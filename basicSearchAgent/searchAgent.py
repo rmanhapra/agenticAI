@@ -3,6 +3,7 @@ from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain.agents import create_agent
 from tavily import TavilyClient
+from langchain_tavily import TavilySearch
 
 
 
@@ -34,10 +35,12 @@ def webSearch_tavily(query:str) -> str:
 
 
 def run_agent():
-    llm = ChatOpenAI()
-    tools = [webSearch_tavily]
+    llm = ChatOpenAI(model="gpt-5")
+    tools = [TavilySearch()]
+   # tools = [webSearch_tavily]
+   
     agent = create_agent(llm, tools)
-    response = agent.invoke({"messages":[HumanMessage(content="What is the weather in singapore?")]})
+    response = agent.invoke({"messages":[HumanMessage(content="get me 5 jobs for databricks lakebase in singapore?")]})
     print(response)
 
 
