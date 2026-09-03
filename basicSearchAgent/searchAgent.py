@@ -1,9 +1,11 @@
+from typing import List
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain.agents import create_agent
 from tavily import TavilyClient
 from langchain_tavily import TavilySearch
+from pydantic import BaseModel, Field
 
 
 
@@ -39,9 +41,23 @@ def run_agent():
     tools = [TavilySearch()]
    # tools = [webSearch_tavily]
    
-    agent = create_agent(llm, tools)
+   # agent = create_agent(llm, tools)
+    agent = create_agent(llm, tools, response_format=AgentResponse)
     response = agent.invoke({"messages":[HumanMessage(content="get me 5 jobs for databricks lakebase in singapore?")]})
     print(response)
+
+class Source(BaseModel):
+    """ Schema for a source used by agent"""
+    url:str = Field(description="url of the source")
+
+
+class AgentResponse(BaseModel):
+    """ Schema for Agents response with answer and the sources it checked"""
+
+    answer:str = Field("Agents answer to the query")
+    sources: List[Source] = Field(default_factory=list, description="List of sources to generate the answer")
+
+
 
 
 
