@@ -1,0 +1,142 @@
+from dotenv import load_dotenv
+
+
+from langsmith import traceable
+import ollama
+
+MAX_ITERATIONS = 10
+MODEL = "qwen3:1.7b"
+
+@traceable(name="Apply Discount", run_type="tool")
+def apply_discount(price:float, discountTier:str) -> float:
+    """ Apply a discount tier to the product price and return final price
+    Available tiers are gold, silver and bronze."""
+    print(f" >> Tier {discountTier}, Product Price {price}")
+    discountTiers = {"gold": 23, "silver": 12, "bronze":5}
+    discount = discountTiers.get(discountTier,0)
+    return round(price * (1-discount/100),2)
+
+@traceable(name="Get Product Price", run_type="tool")
+def get_product_price(product: str) -> float:
+    """Look up for the product price from the catalog"""
+    print(f" >> Executing function call get product price for product {product}")
+    catalog = {"laptop":1299.99, "headphones":149.95, "keyboard":89.50}
+    return catalog.get(product,0)
+
+
+# tools_for_llm = # Difference 2: Without @tool, we must MANUALLY define the JSON schema for each function.
+# This is exactly what LangChain's @tool decorator generates automatically
+# from the function's type hints and docstring.
+tools_for_llm = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_product_price",
+            "description": "Look up the price of a product in the catalog.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product": {
+                        "type": "string",
+                        "description": "The product name, e.g. 'laptop', 'headphones', 'keyboard'",
+                    },
+                },
+                "required": ["product"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_discount",
+            "description": "Apply a discount tier to a price and return the final price. Available tiers: bronze, silver, gold.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "price": {"type": "number", "description": "The original price"},
+                    "discountTier": {
+                        "type": "string",
+                        "description": "The discount tier: 'bronze', 'silver', or 'gold'",
+                    },
+                },
+                "required": ["price", "discountTier"],
+            },
+        },
+    },
+]
+
+@traceable(name="Ollama Chat", run_type="llm")
+def ollama_chat_traced(messages):
+    return ollama.chat(model=MODEL, messages=messages, tools=tools_for_llm)
+
+
+
+
+
+# -- Agent Loop ---
+@traceable(name ="Ollama raw Agent Loop")
+def run_agent(question:str):
+  
+    
+    tools_dict = {"get_product_price":get_product_price, "apply_discount":apply_discount}
+   
+
+    messages = [{"role":"system", "content":(
+            "You are a helpful ecommerce assitant."
+            "You have access to product catalog tool and discoount tool."
+            "Use the tools to get the final price for the product user has asked for \n\n"
+
+            "you must follow below rules strictly."
+            "1. NEVER guess or assume product price. "
+            "You MUST  call get_product_price to get the real price. \n"
+            "2. Only call apply_discount AFTER you have receieved a price from get_product_price. \n"
+            "Pass the exact price - don not pass made up price."
+            ),},
+            {"role":"user", "content":question}]
+
+    # Once llm model is bound with tools invoke agent
+
+    for times in range(1, MAX_ITERATIONS + 1):
+        print(f" -- Iteration number {times} -- ")
+        #ai_response = llm_with_tools.invoke(messages)
+        response = ollama_chat_traced(messages)
+        ai_message = response.get("message")    
+        # check ai respons is tool call
+        tool_calls = ai_message.get("tool_calls", [])
+
+        if not tool_calls:
+            print (f"Final response {response.get('content')}")
+            return response.get('content')
+        
+        # AI could list all the tools in tool_calls so only execute one tool in an iteration
+        tool_call = tool_calls[0]
+        tool_name = tool_call.function.name
+        tool_args = tool_call.function.arguments
+       
+        print(f"Tool selected {tool_name} with args {tool_args}")
+
+        # we have to get the tool python object to execute. So we should 
+        # get the details from the dictionary we created earlier
+        tool_to_use = tools_dict.get(tool_name)
+
+        #observation = tool_to_use.invoke(tool_args)
+        #direct function call for tools
+        observation = tool_to_use(**tool_args)
+
+        print(f"Tool result: {observation}")
+
+        #in each iteration we should append the messages with new info so that it is part of the context
+
+        # append ai response
+        messages.append(ai_message)
+
+        # append tool result and add the tool call id to corelate with tool message with tool id
+        # generated by langchain
+        messages.append({"role":"tool", "content":str(observation)})
+
+
+
+    
+
+if __name__ == "__main__":
+    run_agent("I am a gold tier user; What is the price of laptop for me")
